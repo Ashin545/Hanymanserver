@@ -3,6 +3,6 @@ const { verifyServiceProvider } = require('../controllers/adminController');
 const { protect } = require('../middlewares/authMiddleware');
 const router = express.Router();
 
-router.route('/verify/:id').put(protect, verifyServiceProvider);
+router.put('/verify/:id', protect, verifyServiceProvider);
 
 module.exports = router;

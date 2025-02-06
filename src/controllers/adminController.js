@@ -1,16 +1,20 @@
 const asyncHandler = require('express-async-handler');
-const Admin = require('../models/adminModel');
 const ServiceProvider = require('../models/serviceProviderModel');
 
+// Admin verification of service provider
 const verifyServiceProvider = asyncHandler(async (req, res) => {
-  const serviceProvider = await ServiceProvider.findById(req.params.id);
-  if (serviceProvider) {
-    serviceProvider.isVerified = true;
-    await serviceProvider.save();
-    res.status(200).json({ message: 'Service Provider verified' });
-  } else {
-    res.status(404).json({ message: 'Service Provider not found' });
+  const { id } = req.params;
+  const serviceProvider = await ServiceProvider.findById(id);
+
+  if (!serviceProvider) {
+    res.status(404);
+    throw new Error('Service provider not found');
   }
+
+  serviceProvider.isVerified = true;
+  await serviceProvider.save();
+
+  res.status(200).json({ message: 'Service provider verified successfully' });
 });
 
 module.exports = { verifyServiceProvider };
