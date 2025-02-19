@@ -1,12 +1,19 @@
+// routes/serviceRequestRoutes.js
 const express = require('express');
-const { createServiceRequest, acceptServiceRequest } = require('../controllers/serviceRequestController');
-const { protect } = require('../middlewares/authMiddleware');
 const router = express.Router();
+const serviceRequestController = require('../controllers/serviceRequestController');
+const { protect } = require('../middlewares/authMiddleware');
 
-// Client creates a service request
-router.post('/request', protect, createServiceRequest);
+// Create a new service request (clients only)
+router.post('/create', protect, serviceRequestController.createServiceRequest);
 
-// Service provider accepts a service request
-router.put('/accept/:id', protect, acceptServiceRequest);
+// Get all service requests (for admin or client)
+router.get('/', serviceRequestController.getServiceRequests);
+
+// Get a single service request by ID
+router.get('/:id', serviceRequestController.getServiceRequest);
+
+// Update the status of a service request
+router.put('/:id/status', serviceRequestController.updateServiceRequestStatus);
 
 module.exports = router;

@@ -1,114 +1,128 @@
-const asyncHandler = require('express-async-handler');
-const User = require('../models/userModel');
-const ServiceRequest = require('../models/serviceRequestModel');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const ServiceProvider = require('../models/ServiceProvider');
+const User = require('../models/User');
 
-// Generate JWT Token
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: '30d',
-  });
+// Service provider self-registration
+const registerServiceProvider = async (req, res) => {
+  try {
+    const { name, phone, servicesOffered, availability, email, password } = req.body;
+
+    // Ensure that the user does not already exist
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
+
+    // Create a new user (service provider) with role "serviceProvider"
+    const newUser = new User({
+      name,
+      email,
+      password: await bcrypt.hash(password, 10), // Hash password
+      phone,
+      role: 'serviceProvider',
+    });
+
+    await newUser.save();
+
+    // Create a new service provider entry
+    const newServiceProvider = new ServiceProvider({
+      user: newUser._id,
+      name: name || newUser.name,               // Use `name` from `User` or override it
+      phone: phone || newUser.phone,             // Use `phone` from `User` or override it
+      servicesOffered,                           // Services offered by the provider
+      availability,                              // Availability of the provider
+      verified: false,                           // Set the provider to unverified initially
+    });
+
+    await newServiceProvider.save();
+
+    res.status(201).json({
+      message: 'Service provider registered successfully. Awaiting admin approval.',
+      serviceProvider: newServiceProvider,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
 };
 
-// Service Provider Signup
-const registerServiceProvider = asyncHandler(async (req, res) => {
-  const { name, email, password, serviceType } = req.body;
+// Service provider login
+const loginServiceProvider = async (req, res) => {
+  try {
+    const { email, password } = req.body;
 
-  const userExists = await User.findOne({ email });
-
-  if (userExists) {
-    res.status(400);
-    throw new Error('User already exists');
-  }
-
-  const user = await User.create({
-    name,
-    email,
-    password,
-    serviceType,
-    role: 'serviceProvider',
-    isVerified: false,
-  });
-
-  if (user) {
-    res.status(201).json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      serviceType: user.serviceType,
-      isVerified: user.isVerified,
-      token: generateToken(user._id),
-    });
-  } else {
-    res.status(400);
-    throw new Error('Invalid user data');
-  }
-});
-
-// Service Provider Login
-const authServiceProvider = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-
-  const user = await User.findOne({ email });
-
-  if (user && (await user.matchPassword(password))) {
-    if (user.role === 'serviceProvider') {
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        serviceType: user.serviceType,
-        isVerified: user.isVerified,
-        token: generateToken(user._id),
-      });
-    } else {
-      res.status(401);
-      throw new Error('Not authorized as a service provider');
+    // Find the service provider user by email
+    const user = await User.findOne({ email });
+    if (!user || user.role !== 'serviceProvider') {
+      return res.status(400).json({ message: 'Invalid credentials' });
     }
-  } else {
-    res.status(401);
-    throw new Error('Invalid email or password');
-  }
-});
 
-// Service Provider Profile
-const getServiceProviderProfile = asyncHandler(async (req, res) => {
-  if (req.user.role !== 'serviceProvider') {
-    res.status(401);
-    throw new Error('Not authorized as a service provider');
-  }
+    // Check if the password is correct
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
 
-  const user = await User.findById(req.user._id);
+    // Check if the service provider is approved (verified)
+    const serviceProvider = await ServiceProvider.findOne({ user: user._id });
+    if (!serviceProvider || !serviceProvider.verified) {
+      return res.status(403).json({ message: 'Your account is pending approval by an admin' });
+    }
 
-  if (user) {
-    res.json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      serviceType: user.serviceType,
-      isVerified: user.isVerified,
+    // Generate JWT token
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    res.status(200).json({
+      message: 'Login successful',
+      token,
+      user: {
+        id: user._id,
+        name: serviceProvider.name,  // Name fetched from ServiceProvider model
+        email: user.email,
+        phone: serviceProvider.phone, // Phone fetched from ServiceProvider model
+        role: user.role,
+      }
     });
-  } else {
-    res.status(404);
-    throw new Error('Service provider not found');
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
-});
+};
 
-// Accept Service Request
-const acceptServiceRequest = asyncHandler(async (req, res) => {
-  const serviceRequest = await ServiceRequest.findById(req.params.id);
-  if (serviceRequest) {
-    serviceRequest.serviceProvider = req.user._id;
-    serviceRequest.status = 'Accepted';
-    await serviceRequest.save();
-    res.status(200).json({ message: 'Service Request accepted' });
-  } else {
-    res.status(404);
-    throw new Error('Service Request not found');
+// Admin approves a service provider by their ID
+const approveServiceProvider = async (req, res) => {
+  try {
+    const { serviceProviderId } = req.params;
+
+    // Find the service provider by ID
+    const serviceProvider = await ServiceProvider.findById(serviceProviderId);
+    if (!serviceProvider) {
+      return res.status(404).json({ message: 'Service provider not found' });
+    }
+
+    // Check if the provider is already verified
+    if (serviceProvider.verified) {
+      return res.status(400).json({ message: 'Service provider is already approved' });
+    }
+
+    // Update the service provider's verified status to true
+    serviceProvider.verified = true;
+    await serviceProvider.save();
+
+    res.status(200).json({
+      message: 'Service provider approved successfully',
+      serviceProvider,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
-});
+};
 
-module.exports = { registerServiceProvider, authServiceProvider, getServiceProviderProfile, acceptServiceRequest };
+module.exports = {
+  registerServiceProvider,
+  loginServiceProvider,
+  approveServiceProvider,
+};

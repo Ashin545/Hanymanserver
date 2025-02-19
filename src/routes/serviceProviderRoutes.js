@@ -1,10 +1,15 @@
 const express = require('express');
-const { registerServiceProvider, authServiceProvider, getServiceProviderProfile, acceptServiceRequest } = require('../controllers/serviceProviderController');
-const { protect } = require('../middlewares/authMiddleware');
 const router = express.Router();
+const serviceProviderController = require('../controllers/serviceProviderController');
+const { protect } = require('../middlewares/authMiddleware');
 
-router.post('/signup', registerServiceProvider);
-router.post('/login', authServiceProvider);
-router.get('/profile', protect, getServiceProviderProfile);
-router.put('/accept/:id', protect, acceptServiceRequest); 
+// Service provider self-registration
+router.post('/register', serviceProviderController.registerServiceProvider);
+
+// Service provider login
+router.post('/login', serviceProviderController.loginServiceProvider);
+
+// Admin approves a service provider
+router.put('/approve/:serviceProviderId', protect, serviceProviderController.approveServiceProvider);
+
 module.exports = router;

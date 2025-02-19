@@ -1,29 +1,29 @@
 const jwt = require('jsonwebtoken');
-const asyncHandler = require('express-async-handler');
-const User = require('../models/userModel');
 
-// Protect routes and ensure user is authenticated
-const protect = asyncHandler(async (req, res, next) => {
-  let token;
+const protect = (req, res, next) => {
+  let token = req.headers.authorization;
 
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    try {
-      token = req.headers.authorization.split(' ')[1];
+  if (!token || !token.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'No token provided' });
+  }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  try {
+    // Extract token from the header and verify it
+    token = token.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      req.user = await User.findById(decoded.id).select('-password');
-      next();
-    } catch (error) {
-      res.status(401);
-      throw new Error('Not authorized, token failed');
+    // Attach user info to the request object
+    req.user = decoded;
+
+    // Ensure the user is an admin for approval
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Admin role required' });
     }
-  }
 
-  if (!token) {
-    res.status(401);
-    throw new Error('Not authorized, no token');
+    next();
+  } catch (error) {
+    res.status(401).json({ message: 'Token is not valid' });
   }
-});
+};
 
 module.exports = { protect };
